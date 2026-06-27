@@ -1,65 +1,64 @@
-import Image from "next/image";
+import { AvalancheStrategy } from "@/components/AvalancheStrategy";
+import { DebtCard } from "@/components/DebtCard";
+import { PayoffTimeline } from "@/components/PayoffTimeline";
+import { StatsOverview } from "@/components/StatsOverview";
+import { calculateAvalanchePayoff } from "@/lib/avalanche";
+import { INITIAL_DEBTS, PAYOFF_CONFIG } from "@/lib/debts";
 
 export default function Home() {
+  const simulation = calculateAvalanchePayoff(INITIAL_DEBTS, PAYOFF_CONFIG);
+  const totalStartingBalance = INITIAL_DEBTS.reduce(
+    (sum, d) => sum + d.balance,
+    0
+  );
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-full bg-gradient-to-b from-slate-50 to-slate-100">
+      <header className="border-b border-slate-200 bg-white/80 backdrop-blur">
+        <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-lg font-bold text-white shadow-md">
+              $
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+                Debt Payoff Tracker
+              </h1>
+              <p className="text-sm text-slate-500">
+                Strict avalanche · $600 biweekly · 4 accounts
+              </p>
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </header>
+
+      <main className="mx-auto max-w-5xl space-y-8 px-4 py-8 sm:px-6">
+        <StatsOverview
+          simulation={simulation}
+          totalStartingBalance={totalStartingBalance}
+        />
+
+        <section>
+          <h2 className="mb-4 text-lg font-semibold text-slate-900">
+            Payoff Order & Dates
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {simulation.debts.map((debt, index) => (
+              <DebtCard key={debt.debtId} debt={debt} index={index} />
+            ))}
+          </div>
+        </section>
+
+        <div className="grid gap-8 lg:grid-cols-2">
+          <AvalancheStrategy />
+          <PayoffTimeline simulation={simulation} />
         </div>
       </main>
+
+      <footer className="border-t border-slate-200 bg-white py-6 text-center text-sm text-slate-500">
+        Projections use daily interest accrual with biweekly payments. Compares
+        avalanche plan vs. paying minimums only.
+      </footer>
     </div>
   );
 }
