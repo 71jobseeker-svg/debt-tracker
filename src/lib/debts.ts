@@ -32,8 +32,10 @@ export const INITIAL_DEBTS: Debt[] = [
   },
 ];
 
+export const DEFAULT_BIWEEKLY_PAYMENT = 600;
+
 export const PAYOFF_CONFIG: PayoffConfig = {
-  biweeklyPayment: 600,
+  biweeklyPayment: DEFAULT_BIWEEKLY_PAYMENT,
   startDate: new Date(2026, 6, 3), // July 3, 2026
 };
 

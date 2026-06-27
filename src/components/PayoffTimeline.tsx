@@ -4,18 +4,22 @@ import { INITIAL_DEBTS, PAYOFF_CONFIG } from "@/lib/debts";
 
 interface PayoffTimelineProps {
   simulation: PayoffSimulation;
+  biweeklyPayment: number;
 }
 
-export function PayoffTimeline({ simulation }: PayoffTimelineProps) {
+export function PayoffTimeline({
+  simulation,
+  biweeklyPayment,
+}: PayoffTimelineProps) {
   const payoffEvents = simulation.timeline.filter((e) => e.type === "payoff");
   const totalMin = INITIAL_DEBTS.reduce((s, d) => s + d.minimumPayment, 0);
-  const extraPerPeriod = PAYOFF_CONFIG.biweeklyPayment - totalMin;
+  const extraPerPeriod = Math.max(0, biweeklyPayment - totalMin);
 
   const milestones = [
     {
       date: PAYOFF_CONFIG.startDate,
       title: "Plan starts",
-      description: `$${PAYOFF_CONFIG.biweeklyPayment} every other Friday · $${extraPerPeriod} extra to highest-rate debt after minimums`,
+      description: `$${biweeklyPayment} every other Friday · $${extraPerPeriod} extra to highest-rate debt after minimums`,
       isStart: true,
     },
     ...payoffEvents.map((event) => ({
