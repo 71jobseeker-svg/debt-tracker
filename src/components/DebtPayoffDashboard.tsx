@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AvalancheStrategy } from "@/components/AvalancheStrategy";
 import { DebtCard } from "@/components/DebtCard";
 import { PaymentHistory } from "@/components/PaymentHistory";
@@ -12,6 +12,7 @@ import { applyLoggedPayment } from "@/lib/logPayment";
 import {
   getDefaultAppState,
   loadAppState,
+  resetAppState,
   saveAppState,
 } from "@/lib/storage";
 import type { Debt, PaymentLogEntry } from "@/lib/types";
@@ -22,29 +23,45 @@ const ORIGINAL_BALANCES = Object.fromEntries(
 );
 
 export function DebtPayoffDashboard() {
-  const [debts, setDebts] = useState<Debt[]>(
-    () => getDefaultAppState().debts
-  );
+  const defaults = getDefaultAppState();
+  const [debts, setDebts] = useState<Debt[]>(defaults.debts);
   const [paymentHistory, setPaymentHistory] = useState<PaymentLogEntry[]>(
-    () => getDefaultAppState().paymentHistory
+    defaults.paymentHistory
   );
-  const [biweeklyPayment, setBiweeklyPayment] = useState(
-    () => getDefaultAppState().biweeklyPayment
-  );
-  const [isHydrated, setIsHydrated] = useState(false);
+  const [biweeklyPayment, setBiweeklyPayment] = useState(defaults.biweeklyPayment);
+  const [isReady, setIsReady] = useState(false);
+  const shouldPersistRef = useRef(false);
 
   useEffect(() => {
-    const saved = loadAppState();
-    setDebts(saved.debts);
-    setPaymentHistory(saved.paymentHistory);
-    setBiweeklyPayment(saved.biweeklyPayment);
-    setIsHydrated(true);
+    let cancelled = false;
+
+    (async () => {
+      const saved = await loadAppState();
+      if (cancelled) return;
+
+      if (saved) {
+        setDebts(saved.debts);
+        setPaymentHistory(saved.paymentHistory);
+        setBiweeklyPayment(saved.biweeklyPayment);
+        shouldPersistRef.current = true;
+      }
+
+      setIsReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    if (!isHydrated) return;
-    saveAppState({ debts, paymentHistory, biweeklyPayment });
-  }, [debts, paymentHistory, biweeklyPayment, isHydrated]);
+    if (!isReady || !shouldPersistRef.current) return;
+    void saveAppState({ debts, paymentHistory, biweeklyPayment });
+  }, [debts, paymentHistory, biweeklyPayment, isReady]);
+
+  const markDirty = () => {
+    shouldPersistRef.current = true;
+  };
 
   const originalTotalBalance = useMemo(
     () => INITIAL_DEBTS.reduce((sum, d) => sum + d.balance, 0),
@@ -67,12 +84,14 @@ export function DebtPayoffDashboard() {
 
   const handleBalanceSave = (debtId: string, balance: number) => {
     if (isNaN(balance) || balance < 0) return;
+    markDirty();
     setDebts((prev) =>
       prev.map((d) => (d.id === debtId ? { ...d, balance } : d))
     );
   };
 
   const handleLogPayment = (debtId: string, amount: number) => {
+    markDirty();
     setDebts((prevDebts) => {
       const result = applyLoggedPayment(prevDebts, debtId, amount);
       if (!result) return prevDebts;
@@ -84,6 +103,36 @@ export function DebtPayoffDashboard() {
       return result.debts;
     });
   };
+
+  const handleBiweeklyPaymentSave = (amount: number) => {
+    markDirty();
+    setBiweeklyPayment(amount);
+  };
+
+  const handleResetAll = async () => {
+    if (
+      !window.confirm(
+        "Reset all debts, payment history, and biweekly payment to original defaults? This cannot be undone."
+      )
+    ) {
+      return;
+    }
+
+    await resetAppState();
+    const fresh = getDefaultAppState();
+    setDebts(fresh.debts);
+    setPaymentHistory(fresh.paymentHistory);
+    setBiweeklyPayment(fresh.biweeklyPayment);
+    shouldPersistRef.current = false;
+  };
+
+  if (!isReady) {
+    return (
+      <div className="flex min-h-full items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
+        <p className="text-sm text-slate-500">Loading your debt data…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-full bg-gradient-to-b from-slate-50 to-slate-100">
@@ -141,7 +190,7 @@ export function DebtPayoffDashboard() {
           <AvalancheStrategy
             debts={debts}
             biweeklyPayment={biweeklyPayment}
-            onBiweeklyPaymentSave={setBiweeklyPayment}
+            onBiweeklyPaymentSave={handleBiweeklyPaymentSave}
           />
           <PayoffTimeline
             simulation={simulation}
@@ -152,8 +201,17 @@ export function DebtPayoffDashboard() {
       </main>
 
       <footer className="border-t border-slate-200 bg-white py-6 text-center text-sm text-slate-500">
-        Projections use daily interest accrual with biweekly payments. Compares
-        avalanche plan vs. paying minimums only.
+        <p>
+          Projections use daily interest accrual with biweekly payments. Compares
+          avalanche plan vs. paying minimums only.
+        </p>
+        <button
+          type="button"
+          onClick={() => void handleResetAll()}
+          className="mt-3 text-xs text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
+        >
+          Reset all data to defaults
+        </button>
       </footer>
     </div>
   );

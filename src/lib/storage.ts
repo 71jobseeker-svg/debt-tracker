@@ -1,93 +1,101 @@
 import {
-  DEFAULT_BIWEEKLY_PAYMENT,
-  INITIAL_DEBTS,
-} from "./debts";
-import { migrateTruncatedChasePayment } from "./migrateTruncatedChasePayment";
-import type { Debt, PaymentLogEntry } from "./types";
+  deserializeAppState,
+  getDefaultAppState,
+  serializeAppState,
+  type PersistedAppState,
+} from "./stateSchema";
 
-const STORAGE_KEY = "debt-tracker-state";
-const STORAGE_VERSION = 1;
+const LOCAL_STORAGE_KEY = "debt-tracker-state";
 
-export interface PersistedAppState {
-  debts: Debt[];
-  paymentHistory: PaymentLogEntry[];
-  biweeklyPayment: number;
-}
+async function loadFromApi(): Promise<PersistedAppState | null> {
+  try {
+    const response = await fetch("/api/state", { cache: "no-store" });
+    if (!response.ok) return null;
 
-interface SerializedState {
-  version: number;
-  debts: Debt[];
-  biweeklyPayment: number;
-  paymentHistory: Array<Omit<PaymentLogEntry, "date"> & { date: string }>;
-}
+    const payload = (await response.json()) as { state: unknown | null };
+    if (!payload.state) return null;
 
-export function getDefaultAppState(): PersistedAppState {
-  return {
-    debts: INITIAL_DEBTS.map((d) => ({ ...d })),
-    paymentHistory: [],
-    biweeklyPayment: DEFAULT_BIWEEKLY_PAYMENT,
-  };
-}
-
-export function loadAppState(): PersistedAppState {
-  if (typeof window === "undefined") {
-    return getDefaultAppState();
+    return deserializeAppState(payload.state);
+  } catch {
+    return null;
   }
+}
+
+async function saveToApi(state: PersistedAppState): Promise<boolean> {
+  try {
+    const response = await fetch("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function resetApi(): Promise<boolean> {
+  try {
+    const response = await fetch("/api/state", { method: "DELETE" });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function loadFromLocalStorage(): PersistedAppState | null {
+  if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return getDefaultAppState();
-
-    const parsed = JSON.parse(raw) as SerializedState;
-    if (parsed.version !== STORAGE_VERSION || !Array.isArray(parsed.debts)) {
-      return getDefaultAppState();
-    }
-
-    const loaded: PersistedAppState = {
-      debts: parsed.debts,
-      biweeklyPayment:
-        typeof parsed.biweeklyPayment === "number"
-          ? parsed.biweeklyPayment
-          : DEFAULT_BIWEEKLY_PAYMENT,
-      paymentHistory: (parsed.paymentHistory ?? []).map((entry) => ({
-        ...entry,
-        date: new Date(entry.date),
-      })),
-    };
-
-    const migrated = migrateTruncatedChasePayment(
-      loaded.debts,
-      loaded.paymentHistory
-    );
-
-    if (migrated.changed) {
-      const corrected: PersistedAppState = {
-        debts: migrated.debts,
-        paymentHistory: migrated.history,
-        biweeklyPayment: loaded.biweeklyPayment,
-      };
-      saveAppState(corrected);
-      return corrected;
-    }
-
-    return loaded;
+    const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (!raw) return null;
+    return deserializeAppState(JSON.parse(raw));
   } catch {
-    return getDefaultAppState();
+    return null;
   }
 }
 
-export function saveAppState(state: PersistedAppState): void {
+function saveToLocalStorage(state: PersistedAppState): void {
   if (typeof window === "undefined") return;
-
-  const serialized: SerializedState = {
-    version: STORAGE_VERSION,
-    debts: state.debts,
-    biweeklyPayment: state.biweeklyPayment,
-    paymentHistory: state.paymentHistory.map((entry) => ({
-      ...entry,
-      date: entry.date.toISOString(),
-    })),
-  };
-
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(serialized));
+  window.localStorage.setItem(
+    LOCAL_STORAGE_KEY,
+    JSON.stringify(serializeAppState(state))
+  );
 }
+
+function clearLocalStorage(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(LOCAL_STORAGE_KEY);
+}
+
+/**
+ * Loads persisted state from Vercel KV (via API), falling back to
+ * localStorage when KV is unavailable (e.g. local dev without env vars).
+ * Returns null if no saved data exists — does NOT return defaults.
+ */
+export async function loadAppState(): Promise<PersistedAppState | null> {
+  const fromApi = await loadFromApi();
+  if (fromApi) return fromApi;
+
+  return loadFromLocalStorage();
+}
+
+/**
+ * Persists state to Vercel KV, with localStorage as a dev fallback.
+ */
+export async function saveAppState(state: PersistedAppState): Promise<void> {
+  const savedToApi = await saveToApi(state);
+  if (!savedToApi) {
+    saveToLocalStorage(state);
+  }
+}
+
+/**
+ * Clears persisted state (explicit reset only).
+ */
+export async function resetAppState(): Promise<void> {
+  await resetApi();
+  clearLocalStorage();
+}
+
+export { getDefaultAppState };
