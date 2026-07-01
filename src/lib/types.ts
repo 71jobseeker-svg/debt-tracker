@@ -1,3 +1,15 @@
+export interface PaymentLogEntry {
+  id: string;
+  debtId: string;
+  debtName: string;
+  amount: number;
+  date: Date;
+  /** @deprecated Legacy rollover entries are removed by migration */
+  note?: string;
+  /** @deprecated Legacy rollover entries are removed by migration */
+  isRollover?: boolean;
+}
+
 export interface Debt {
   id: string;
   name: string;

@@ -5,11 +5,13 @@ import { INITIAL_DEBTS, PAYOFF_CONFIG } from "@/lib/debts";
 interface PayoffTimelineProps {
   simulation: PayoffSimulation;
   biweeklyPayment: number;
+  currentTotalBalance: number;
 }
 
 export function PayoffTimeline({
   simulation,
   biweeklyPayment,
+  currentTotalBalance,
 }: PayoffTimelineProps) {
   const payoffEvents = simulation.timeline.filter((e) => e.type === "payoff");
   const totalMin = INITIAL_DEBTS.reduce((s, d) => s + d.minimumPayment, 0);
@@ -31,7 +33,7 @@ export function PayoffTimeline({
     {
       date: simulation.debtFreeDate,
       title: "Debt free!",
-      description: `All ${formatCurrency(INITIAL_DEBTS.reduce((s, d) => s + d.balance, 0))} paid off · ${formatCurrency(simulation.interestSaved)} interest saved vs. minimums`,
+      description: `All ${formatCurrency(currentTotalBalance)} remaining · ${formatCurrency(simulation.interestSaved)} interest saved vs. minimums`,
       isStart: false,
       isEnd: true,
     },

@@ -1,4 +1,8 @@
-import { INITIAL_DEBTS, PAYOFF_CONFIG, getAvalancheOrder } from "@/lib/debts";
+"use client";
+
+import { useEffect, useState } from "react";
+import type { Debt } from "@/lib/types";
+import { PAYOFF_CONFIG, getAvalancheOrder } from "@/lib/debts";
 import {
   formatCurrency,
   formatDate,
@@ -6,17 +10,31 @@ import {
 } from "@/lib/format";
 
 interface AvalancheStrategyProps {
+  debts: Debt[];
   biweeklyPayment: number;
-  onBiweeklyPaymentChange: (amount: number) => void;
+  onBiweeklyPaymentSave: (amount: number) => void;
 }
 
 export function AvalancheStrategy({
+  debts,
   biweeklyPayment,
-  onBiweeklyPaymentChange,
+  onBiweeklyPaymentSave,
 }: AvalancheStrategyProps) {
-  const ordered = getAvalancheOrder(INITIAL_DEBTS);
-  const totalMin = INITIAL_DEBTS.reduce((s, d) => s + d.minimumPayment, 0);
+  const [draftPayment, setDraftPayment] = useState(String(biweeklyPayment));
+  const ordered = getAvalancheOrder(debts);
+  const totalMin = debts.reduce((s, d) => s + d.minimumPayment, 0);
   const extraToTarget = Math.max(0, biweeklyPayment - totalMin);
+
+  useEffect(() => {
+    setDraftPayment(String(biweeklyPayment));
+  }, [biweeklyPayment]);
+
+  const handleSave = () => {
+    const next = parseFloat(draftPayment);
+    if (!isNaN(next) && next > 0) {
+      onBiweeklyPaymentSave(next);
+    }
+  };
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -27,7 +45,7 @@ export function AvalancheStrategy({
         Every other Friday starting {formatDate(PAYOFF_CONFIG.startDate)}
       </p>
 
-      <div className="mt-4 flex flex-wrap gap-4 rounded-lg bg-slate-50 p-4">
+      <div className="mt-4 flex flex-wrap items-end gap-4 rounded-lg bg-slate-50 p-4">
         <div>
           <label
             htmlFor="biweekly-payment"
@@ -35,24 +53,31 @@ export function AvalancheStrategy({
           >
             Biweekly Payment
           </label>
-          <div className="relative mt-1">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">
-              $
-            </span>
-            <input
-              id="biweekly-payment"
-              type="number"
-              min={1}
-              step={1}
-              value={biweeklyPayment}
-              onChange={(e) => {
-                const next = parseFloat(e.target.value);
-                if (!isNaN(next) && next > 0) {
-                  onBiweeklyPaymentChange(next);
-                }
-              }}
-              className="w-32 rounded-lg border border-slate-300 bg-white py-1.5 pl-7 pr-3 text-xl font-bold text-slate-900 shadow-sm outline-none ring-indigo-500 transition-shadow focus:border-indigo-500 focus:ring-2"
-            />
+          <div className="mt-1 flex items-center gap-2">
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">
+                $
+              </span>
+              <input
+                id="biweekly-payment"
+                type="number"
+                min={1}
+                step={1}
+                value={draftPayment}
+                onChange={(e) => setDraftPayment(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSave();
+                }}
+                className="w-32 rounded-lg border border-slate-300 bg-white py-1.5 pl-7 pr-3 text-xl font-bold text-slate-900 shadow-sm outline-none ring-indigo-500 transition-shadow focus:border-indigo-500 focus:ring-2"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleSave}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            >
+              Update
+            </button>
           </div>
         </div>
         <div>
@@ -92,11 +117,12 @@ export function AvalancheStrategy({
             <div className="min-w-0 flex-1">
               <p className="font-medium text-slate-900">{debt.name}</p>
               <p className="text-sm text-slate-500">
-                {formatPercent(debt.interestRate)} · {formatCurrency(debt.balance)}{" "}
-                · {formatCurrency(debt.minimumPayment)}/period min
+                {formatPercent(debt.interestRate)} ·{" "}
+                {formatCurrency(debt.balance)} remaining ·{" "}
+                {formatCurrency(debt.minimumPayment)}/period min
               </p>
             </div>
-            {i === 0 && (
+            {i === 0 && debt.balance > 0 && (
               <span className="shrink-0 rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">
                 Target
               </span>
