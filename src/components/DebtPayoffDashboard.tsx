@@ -1,20 +1,20 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AvalancheStrategy } from "@/components/AvalancheStrategy";
 import { DebtCard } from "@/components/DebtCard";
 import { PaymentHistory } from "@/components/PaymentHistory";
 import { PayoffTimeline } from "@/components/PayoffTimeline";
 import { StatsOverview } from "@/components/StatsOverview";
 import { calculateAvalanchePayoff } from "@/lib/avalanche";
-import {
-  DEFAULT_BIWEEKLY_PAYMENT,
-  INITIAL_DEBTS,
-  PAYOFF_CONFIG,
-} from "@/lib/debts";
-import type { Debt, PaymentLogEntry } from "@/lib/types";
+import { INITIAL_DEBTS, PAYOFF_CONFIG } from "@/lib/debts";
 import { applyLoggedPayment } from "@/lib/logPayment";
-import { migrateTruncatedChasePayment } from "@/lib/migrateTruncatedChasePayment";
+import {
+  getDefaultAppState,
+  loadAppState,
+  saveAppState,
+} from "@/lib/storage";
+import type { Debt, PaymentLogEntry } from "@/lib/types";
 import { formatCurrency } from "@/lib/format";
 
 const ORIGINAL_BALANCES = Object.fromEntries(
@@ -22,21 +22,29 @@ const ORIGINAL_BALANCES = Object.fromEntries(
 );
 
 export function DebtPayoffDashboard() {
-  const [debts, setDebts] = useState<Debt[]>(() =>
-    INITIAL_DEBTS.map((d) => ({ ...d }))
+  const [debts, setDebts] = useState<Debt[]>(
+    () => getDefaultAppState().debts
   );
-  const [paymentHistory, setPaymentHistory] = useState<PaymentLogEntry[]>([]);
+  const [paymentHistory, setPaymentHistory] = useState<PaymentLogEntry[]>(
+    () => getDefaultAppState().paymentHistory
+  );
   const [biweeklyPayment, setBiweeklyPayment] = useState(
-    DEFAULT_BIWEEKLY_PAYMENT
+    () => getDefaultAppState().biweeklyPayment
   );
+  const [isHydrated, setIsHydrated] = useState(false);
 
-  useLayoutEffect(() => {
-    const migrated = migrateTruncatedChasePayment(debts, paymentHistory);
-    if (!migrated.changed) return;
-    setDebts(migrated.debts);
-    setPaymentHistory(migrated.history);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time fix for truncated Chase entry on mount
+  useEffect(() => {
+    const saved = loadAppState();
+    setDebts(saved.debts);
+    setPaymentHistory(saved.paymentHistory);
+    setBiweeklyPayment(saved.biweeklyPayment);
+    setIsHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    saveAppState({ debts, paymentHistory, biweeklyPayment });
+  }, [debts, paymentHistory, biweeklyPayment, isHydrated]);
 
   const originalTotalBalance = useMemo(
     () => INITIAL_DEBTS.reduce((sum, d) => sum + d.balance, 0),
@@ -65,11 +73,16 @@ export function DebtPayoffDashboard() {
   };
 
   const handleLogPayment = (debtId: string, amount: number) => {
-    const result = applyLoggedPayment(debts, debtId, amount);
-    if (!result) return;
+    setDebts((prevDebts) => {
+      const result = applyLoggedPayment(prevDebts, debtId, amount);
+      if (!result) return prevDebts;
 
-    setDebts(result.debts);
-    setPaymentHistory((prev) => [...prev, result.entries[0]]);
+      setPaymentHistory((prevHistory) => [
+        ...prevHistory,
+        result.entries[0],
+      ]);
+      return result.debts;
+    });
   };
 
   return (
