@@ -14,6 +14,7 @@ import {
   loadAppState,
   resetAppState,
   saveAppState,
+  StorageError,
 } from "@/lib/storage";
 import type { PersistedAppState } from "@/lib/stateSchema";
 import type { Debt, PaymentLogEntry } from "@/lib/types";
@@ -31,24 +32,74 @@ export function DebtPayoffDashboard() {
   );
   const [biweeklyPayment, setBiweeklyPayment] = useState(defaults.biweeklyPayment);
   const [isReady, setIsReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const shouldPersistRef = useRef(false);
   const stateRef = useRef<PersistedAppState>({
     debts: defaults.debts,
     paymentHistory: defaults.paymentHistory,
     biweeklyPayment: defaults.biweeklyPayment,
   });
-  const saveInFlightRef = useRef<Promise<boolean> | null>(null);
+  const saveInFlightRef = useRef<Promise<void> | null>(null);
 
   const persist = useCallback(async () => {
-    if (!shouldPersistRef.current) return true;
+    if (!shouldPersistRef.current) return;
 
-    const promise = saveAppState(stateRef.current);
+    const promise = (async () => {
+      try {
+        await saveAppState(stateRef.current);
+        setSaveError(null);
+      } catch (error) {
+        console.error("[debt-tracker] persist() caught error", {
+          error,
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          cause: error instanceof Error ? error.cause : undefined,
+        });
+        const message =
+          error instanceof StorageError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : "An unexpected error occurred while saving";
+        setSaveError(message);
+        window.alert(
+          `Save failed: ${message}\n\nYour change is visible on screen but was NOT saved to the server. Please retry.`
+        );
+        throw error;
+      }
+    })();
+
     saveInFlightRef.current = promise;
-    const ok = await promise;
-    if (saveInFlightRef.current === promise) {
-      saveInFlightRef.current = null;
+    try {
+      await promise;
+    } finally {
+      if (saveInFlightRef.current === promise) {
+        saveInFlightRef.current = null;
+      }
     }
-    return ok;
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setLoadError(null);
+    setIsReady(false);
+
+    try {
+      const { state: saved, isNew } = await loadAppState();
+      setDebts(saved.debts);
+      setPaymentHistory(saved.paymentHistory);
+      setBiweeklyPayment(saved.biweeklyPayment);
+      stateRef.current = saved;
+      shouldPersistRef.current = !isNew;
+    } catch (error) {
+      const message =
+        error instanceof StorageError
+          ? error.message
+          : "Failed to load debt data from server";
+      setLoadError(message);
+    } finally {
+      setIsReady(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -56,44 +107,29 @@ export function DebtPayoffDashboard() {
   }, [debts, paymentHistory, biweeklyPayment]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      const saved = await loadAppState();
-      if (cancelled) return;
-
-      if (saved) {
-        setDebts(saved.debts);
-        setPaymentHistory(saved.paymentHistory);
-        setBiweeklyPayment(saved.biweeklyPayment);
-        stateRef.current = saved;
-        shouldPersistRef.current = true;
-      }
-
-      setIsReady(true);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   useEffect(() => {
-    if (!isReady || !shouldPersistRef.current) return;
+    if (!isReady || !shouldPersistRef.current || loadError) return;
 
     const timer = setTimeout(() => {
-      void persist();
+      void persist().catch(() => undefined);
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [debts, paymentHistory, biweeklyPayment, isReady, persist]);
+  }, [debts, paymentHistory, biweeklyPayment, isReady, loadError, persist]);
 
   useEffect(() => {
     const flushOnHide = () => {
-      if (document.visibilityState !== "hidden" || !shouldPersistRef.current) {
+      if (
+        document.visibilityState !== "hidden" ||
+        !shouldPersistRef.current ||
+        loadError
+      ) {
         return;
       }
-      void persist();
+      void persist().catch(() => undefined);
     };
 
     document.addEventListener("visibilitychange", flushOnHide);
@@ -103,7 +139,7 @@ export function DebtPayoffDashboard() {
       document.removeEventListener("visibilitychange", flushOnHide);
       window.removeEventListener("pagehide", flushOnHide);
     };
-  }, [persist]);
+  }, [loadError, persist]);
 
   const markDirty = () => {
     shouldPersistRef.current = true;
@@ -194,7 +230,8 @@ export function DebtPayoffDashboard() {
     setDebts(fresh.debts);
     setPaymentHistory(fresh.paymentHistory);
     setBiweeklyPayment(fresh.biweeklyPayment);
-    shouldPersistRef.current = false;
+    shouldPersistRef.current = true;
+    await persist();
   };
 
   if (!isReady) {
@@ -205,8 +242,39 @@ export function DebtPayoffDashboard() {
     );
   }
 
+  if (loadError) {
+    return (
+      <div className="flex min-h-full flex-col items-center justify-center gap-4 bg-gradient-to-b from-slate-50 to-slate-100 px-6 text-center">
+        <div className="max-w-md rounded-xl border border-red-200 bg-red-50 p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-red-800">
+            Could not load debt data
+          </h2>
+          <p className="mt-2 text-sm text-red-700">{loadError}</p>
+          <p className="mt-2 text-xs text-red-600">
+            Data is loaded from Redis only. localStorage and default balances are
+            not used when the server is unavailable.
+          </p>
+          <button
+            type="button"
+            onClick={() => void loadData()}
+            className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-full bg-gradient-to-b from-slate-50 to-slate-100">
+      {saveError && (
+        <div className="border-b border-red-200 bg-red-50 px-4 py-3 text-center text-sm text-red-700">
+          Save failed: {saveError}. Your last change may not be persisted —
+          please try saving again.
+        </div>
+      )}
+
       <header className="border-b border-slate-200 bg-white/80 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
           <div className="flex items-center gap-3">

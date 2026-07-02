@@ -35,7 +35,10 @@ export function serializeAppState(state: PersistedAppState): SerializedState {
     biweeklyPayment: state.biweeklyPayment,
     paymentHistory: state.paymentHistory.map((entry) => ({
       ...entry,
-      date: entry.date.toISOString(),
+      date:
+        entry.date instanceof Date
+          ? entry.date.toISOString()
+          : String(entry.date),
     })),
   };
 }

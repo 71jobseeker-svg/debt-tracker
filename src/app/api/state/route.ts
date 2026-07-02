@@ -63,9 +63,11 @@ export async function PUT(request: Request) {
     await redis.set(KV_STATE_KEY, serialized);
     return NextResponse.json({ ok: true });
   } catch (error) {
+    const detail =
+      error instanceof Error ? error.message : String(error);
     console.error("PUT /api/state failed:", error);
     return NextResponse.json(
-      { error: "Failed to save state" },
+      { error: "Failed to save state", detail },
       { status: 500 }
     );
   }
