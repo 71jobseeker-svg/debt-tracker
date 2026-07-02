@@ -20,8 +20,8 @@ interface DebtCardProps {
   index: number;
   currentBalance: number;
   originalBalance: number;
-  onBalanceSave: (debtId: string, balance: number) => void;
-  onLogPayment: (debtId: string, amount: number) => void;
+  onBalanceSave: (debtId: string, balance: number) => void | Promise<void>;
+  onLogPayment: (debtId: string, amount: number) => void | Promise<void>;
 }
 
 export function DebtCard({
@@ -48,13 +48,13 @@ export function DebtCard({
   const handleBalanceSave = () => {
     const next = parseFloat(balanceDraft);
     if (isNaN(next) || next < 0) return;
-    onBalanceSave(debt.debtId, next);
+    void onBalanceSave(debt.debtId, next);
   };
 
   const handleLogPayment = () => {
     const amount = parseFloat(paymentDraft);
     if (isNaN(amount) || amount <= 0) return;
-    onLogPayment(debt.debtId, amount);
+    void onLogPayment(debt.debtId, amount);
     setPaymentDraft("");
   };
 

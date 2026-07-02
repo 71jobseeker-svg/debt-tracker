@@ -6,6 +6,14 @@ import {
 } from "./stateSchema";
 
 const LOCAL_STORAGE_KEY = "debt-tracker-state";
+const API_TIMEOUT_MS = 3000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
 
 async function loadFromApi(): Promise<PersistedAppState | null> {
   try {
@@ -27,6 +35,7 @@ async function saveToApi(state: PersistedAppState): Promise<boolean> {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(state),
+      keepalive: true,
     });
     return response.ok;
   } catch {
@@ -69,25 +78,26 @@ function clearLocalStorage(): void {
 }
 
 /**
- * Loads persisted state from Vercel KV (via API), falling back to
- * localStorage when KV is unavailable (e.g. local dev without env vars).
- * Returns null if no saved data exists — does NOT return defaults.
+ * Loads persisted state: tries Redis (with timeout), then localStorage, then
+ * returns null (caller falls back to hardcoded defaults). localStorage is read
+ * synchronously so slow/failed Redis never blocks showing cached data.
  */
 export async function loadAppState(): Promise<PersistedAppState | null> {
-  const fromApi = await loadFromApi();
-  if (fromApi) return fromApi;
+  const fromLocal = loadFromLocalStorage();
+  const fromApi = await withTimeout(loadFromApi(), API_TIMEOUT_MS);
 
-  return loadFromLocalStorage();
+  if (fromApi) return fromApi;
+  if (fromLocal) return fromLocal;
+  return null;
 }
 
 /**
- * Persists state to Vercel KV, with localStorage as a dev fallback.
+ * Persists state to localStorage immediately, then awaits Redis PUT.
+ * Returns true if Redis save succeeded.
  */
-export async function saveAppState(state: PersistedAppState): Promise<void> {
-  const savedToApi = await saveToApi(state);
-  if (!savedToApi) {
-    saveToLocalStorage(state);
-  }
+export async function saveAppState(state: PersistedAppState): Promise<boolean> {
+  saveToLocalStorage(state);
+  return saveToApi(state);
 }
 
 /**

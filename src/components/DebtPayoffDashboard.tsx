@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AvalancheStrategy } from "@/components/AvalancheStrategy";
 import { DebtCard } from "@/components/DebtCard";
 import { PaymentHistory } from "@/components/PaymentHistory";
@@ -15,6 +15,7 @@ import {
   resetAppState,
   saveAppState,
 } from "@/lib/storage";
+import type { PersistedAppState } from "@/lib/stateSchema";
 import type { Debt, PaymentLogEntry } from "@/lib/types";
 import { formatCurrency } from "@/lib/format";
 
@@ -31,6 +32,28 @@ export function DebtPayoffDashboard() {
   const [biweeklyPayment, setBiweeklyPayment] = useState(defaults.biweeklyPayment);
   const [isReady, setIsReady] = useState(false);
   const shouldPersistRef = useRef(false);
+  const stateRef = useRef<PersistedAppState>({
+    debts: defaults.debts,
+    paymentHistory: defaults.paymentHistory,
+    biweeklyPayment: defaults.biweeklyPayment,
+  });
+  const saveInFlightRef = useRef<Promise<boolean> | null>(null);
+
+  const persist = useCallback(async () => {
+    if (!shouldPersistRef.current) return true;
+
+    const promise = saveAppState(stateRef.current);
+    saveInFlightRef.current = promise;
+    const ok = await promise;
+    if (saveInFlightRef.current === promise) {
+      saveInFlightRef.current = null;
+    }
+    return ok;
+  }, []);
+
+  useEffect(() => {
+    stateRef.current = { debts, paymentHistory, biweeklyPayment };
+  }, [debts, paymentHistory, biweeklyPayment]);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,6 +66,7 @@ export function DebtPayoffDashboard() {
         setDebts(saved.debts);
         setPaymentHistory(saved.paymentHistory);
         setBiweeklyPayment(saved.biweeklyPayment);
+        stateRef.current = saved;
         shouldPersistRef.current = true;
       }
 
@@ -56,8 +80,30 @@ export function DebtPayoffDashboard() {
 
   useEffect(() => {
     if (!isReady || !shouldPersistRef.current) return;
-    void saveAppState({ debts, paymentHistory, biweeklyPayment });
-  }, [debts, paymentHistory, biweeklyPayment, isReady]);
+
+    const timer = setTimeout(() => {
+      void persist();
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [debts, paymentHistory, biweeklyPayment, isReady, persist]);
+
+  useEffect(() => {
+    const flushOnHide = () => {
+      if (document.visibilityState !== "hidden" || !shouldPersistRef.current) {
+        return;
+      }
+      void persist();
+    };
+
+    document.addEventListener("visibilitychange", flushOnHide);
+    window.addEventListener("pagehide", flushOnHide);
+
+    return () => {
+      document.removeEventListener("visibilitychange", flushOnHide);
+      window.removeEventListener("pagehide", flushOnHide);
+    };
+  }, [persist]);
 
   const markDirty = () => {
     shouldPersistRef.current = true;
@@ -82,31 +128,55 @@ export function DebtPayoffDashboard() {
     [debts, biweeklyPayment]
   );
 
-  const handleBalanceSave = (debtId: string, balance: number) => {
+  const handleBalanceSave = async (debtId: string, balance: number) => {
     if (isNaN(balance) || balance < 0) return;
     markDirty();
-    setDebts((prev) =>
-      prev.map((d) => (d.id === debtId ? { ...d, balance } : d))
+
+    const nextDebts = debts.map((d) =>
+      d.id === debtId ? { ...d, balance } : d
     );
+    const nextState: PersistedAppState = {
+      debts: nextDebts,
+      paymentHistory,
+      biweeklyPayment,
+    };
+
+    stateRef.current = nextState;
+    setDebts(nextDebts);
+    await persist();
   };
 
-  const handleLogPayment = (debtId: string, amount: number) => {
-    markDirty();
-    setDebts((prevDebts) => {
-      const result = applyLoggedPayment(prevDebts, debtId, amount);
-      if (!result) return prevDebts;
+  const handleLogPayment = async (debtId: string, amount: number) => {
+    const result = applyLoggedPayment(debts, debtId, amount);
+    if (!result) return;
 
-      setPaymentHistory((prevHistory) => [
-        ...prevHistory,
-        result.entries[0],
-      ]);
-      return result.debts;
-    });
+    markDirty();
+
+    const nextHistory = [...paymentHistory, result.entries[0]];
+    const nextState: PersistedAppState = {
+      debts: result.debts,
+      paymentHistory: nextHistory,
+      biweeklyPayment,
+    };
+
+    stateRef.current = nextState;
+    setDebts(result.debts);
+    setPaymentHistory(nextHistory);
+    await persist();
   };
 
-  const handleBiweeklyPaymentSave = (amount: number) => {
+  const handleBiweeklyPaymentSave = async (amount: number) => {
     markDirty();
+
+    const nextState: PersistedAppState = {
+      debts,
+      paymentHistory,
+      biweeklyPayment: amount,
+    };
+
+    stateRef.current = nextState;
     setBiweeklyPayment(amount);
+    await persist();
   };
 
   const handleResetAll = async () => {
@@ -120,6 +190,7 @@ export function DebtPayoffDashboard() {
 
     await resetAppState();
     const fresh = getDefaultAppState();
+    stateRef.current = fresh;
     setDebts(fresh.debts);
     setPaymentHistory(fresh.paymentHistory);
     setBiweeklyPayment(fresh.biweeklyPayment);
@@ -190,7 +261,7 @@ export function DebtPayoffDashboard() {
           <AvalancheStrategy
             debts={debts}
             biweeklyPayment={biweeklyPayment}
-            onBiweeklyPaymentSave={handleBiweeklyPaymentSave}
+            onBiweeklyPaymentSave={(amount) => void handleBiweeklyPaymentSave(amount)}
           />
           <PayoffTimeline
             simulation={simulation}
